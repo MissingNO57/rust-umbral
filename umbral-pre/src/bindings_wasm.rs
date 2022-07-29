@@ -15,7 +15,6 @@ use alloc::{vec, vec::Vec};
 use core::fmt;
 
 use js_sys::Error;
-use wasm_bindgen::prelude::{wasm_bindgen, JsValue};
 
 use serde::{Deserialize, Serialize};
 
