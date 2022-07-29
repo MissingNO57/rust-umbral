@@ -9,7 +9,7 @@ This repo contains the WASM-based JS bindings for the [main Rust project][umbral
 (This code can be found in the `examples` folder)
 
 ```javascript
-import * as umbral from "umbral-pre";
+import * as umbral from "@nucypher/umbral-pre";
 
 let enc = new TextEncoder();
 let dec = new TextDecoder("utf-8");
@@ -101,7 +101,7 @@ $ make
 After you have successfully built the WASM package, run one of the example projects in the `examples` directory.
 
 
-[js-npm-image]: https://img.shields.io/npm/v/umbral-pre
-[js-npm-link]: https://www.npmjs.com/package/umbral-pre
-[js-license-image]: https://img.shields.io/npm/l/umbral-pre
+[js-npm-image]: https://img.shields.io/npm/v/@nucypher/umbral-pre
+[js-npm-link]: https://www.npmjs.com/package/@nucypher/umbral-pre
+[js-license-image]: https://img.shields.io/npm/l/@nucypher/umbral-pre
 [umbral-pre]: https://github.com/nucypher/rust-umbral/tree/master/umbral-pre

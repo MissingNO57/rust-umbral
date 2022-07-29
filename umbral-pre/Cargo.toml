@@ -1,8 +1,8 @@
 [package]
 name = "umbral-pre"
-version = "0.3.0"
+version = "0.5.2"
 authors = ["Bogdan Opanchuk <bogdan@opanchuk.net>"]
-edition = "2018"
+edition = "2021"
 license = "GPL-3.0-only"
 description = "Implementation of Umbral proxy reencryption algorithm"
 repository = "https://github.com/nucypher/rust-umbral/tree/master/umbral-pre"
@@ -11,12 +11,15 @@ categories = ["cryptography", "no-std"]
 
 [dependencies]
 k256 = { package = "k256", version = "0.7", default-features = false, features = ["ecdsa", "arithmetic", "zeroize"] }
+
 sha2 = { version = "0.9", default-features = false }
-chacha20poly1305 = { version = "0.8", features = ["xchacha20poly1305"] }
+chacha20poly1305 = { version = "0.9" }
 hkdf = { version = "0.11", default-features = false }
 hex = { version = "0.4", default-features = false, features = ["alloc"] }
-serde = { version = "1", default-features = false }
+serde = { version = "1", default-features = false, features = ["derive"], optional = true }
 base64 = { version = "0.13", default-features = false, features = ["alloc"] }
+pyo3 = { version = "0.15", optional = true }
+js-sys = { version = "0.3", optional = true }
 
 # These packages are among the dependencies of the packages above.
 # Their versions should be updated when the main packages above are updated.

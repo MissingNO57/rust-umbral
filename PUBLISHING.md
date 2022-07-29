@@ -4,16 +4,21 @@ Ideally it would be done by a CI action.
 For now it has to be done manually.
 
 
+## Keeping the changelog and bumping the version
+
+For every version, list the "Changed" items first (meaning backward incompatible changes), then "Added" (new features), then "Fixed" (bug fixes, or other improvements that do not change the API/ABI).
+Rust has some specifics in what is considered a breaking change; refer to https://doc.rust-lang.org/cargo/reference/semver.html for the full list.
+The version number part (major/minor/patch) that is bumped should correspond to whether there is something in "Changed" or "Added" categories.
+
+
 ## Release commit
 
-- Update `CHANGELOG.md` (replace `Unpublished` with the version and the release date).
-- Bump version in `umbral-pre/Cargo.toml`.
-- Bump version in `umbral-pre-python/Cargo.toml`.
-- Bump version in `umbral-pre-python/docs/conf.py`.
-- Bump version in `umbral-pre-python/setup.py`.
-- Bump version in `umbral-pre-wasm/Cargo.toml`.
-- Bump version in `umbral-pre-wasm/package.template.json`.
-- Tag the release commit with the version tag (in `v*.*.*` format).
+- Update `CHANGELOG.md` (replace `Unreleased` with the version and the release date).
+- Use Python [Bumpversion](https://github.com/c4urself/bump2version/) to autmoatically update relevant version strings throughout the repo.
+  - `bump2version minor --current-version <major>.<minor>.<patch>`
+- git push the commit and tag
+  - `git push upstream master --tags`
+
 
 
 ## Rust crate
@@ -28,13 +33,8 @@ See https://doc.rust-lang.org/cargo/reference/publishing.html for more info on p
 
 ## Python package
 
-In `umbral-pre-python` dir:
-
-- Clean `dist` (if it is not empty).
-- `python setup.py sdist` (generate source distribution).
-- `docker run --rm -v `pwd`/..:/io quay.io/pypa/manylinux2014_x86_64 /io/umbral-pre-python/build-wheels.sh` (generate Linux wheels).
-- `twine upload dist/*`.
-
+Gitub Actions are configured to take care of this automatically.
+- Can be [manually triggered here](https://github.com/nucypher/rust-umbral/actions/workflows/wheels.yml) (manual mode has not been tested)
 
 ## NPM package
 

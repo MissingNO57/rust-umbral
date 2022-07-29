@@ -5,9 +5,12 @@ on:
     paths-ignore:
       - README.md
   push:
-    branches: master
+    branches:
+      - master
     paths-ignore:
       - README.md
+    tags:
+      - v*
 
 env:
   CARGO_INCREMENTAL: 0
@@ -20,7 +23,7 @@ jobs:
     - uses: actions/checkout@v1
     - uses: actions-rs/toolchain@v1
       with:
-        toolchain: 1.51.0 # MSRV
+        toolchain: 1.56.0 # MSRV
         components: clippy
         override: true
         profile: minimal

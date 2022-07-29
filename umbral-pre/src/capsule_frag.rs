@@ -3,19 +3,24 @@ use core::fmt;
 use generic_array::sequence::Concat;
 use generic_array::GenericArray;
 use rand_core::{CryptoRng, RngCore};
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use typenum::op;
 
+#[cfg(feature = "serde-support")]
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
 use crate::capsule::Capsule;
-use crate::curve::{CurvePoint, CurveScalar};
+use crate::curve::{CurvePoint, CurveScalar, NonZeroCurveScalar};
 use crate::hashing_ds::{hash_to_cfrag_verification, kfrag_signature_message};
 use crate::key_frag::{KeyFrag, KeyFragID};
 use crate::keys::{PublicKey, Signature};
-use crate::serde::{serde_deserialize, serde_serialize, Representation};
+use crate::secret_box::SecretBox;
 use crate::traits::{
     fmt_public, ConstructionError, DeserializableFromArray, DeserializationError, HasTypeName,
     RepresentableAsArray, SerializableToArray,
 };
+
+#[cfg(feature = "serde-support")]
+use crate::serde::{serde_deserialize, serde_serialize, Representation};
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct CapsuleFragProof {
@@ -73,14 +78,14 @@ impl CapsuleFragProof {
     fn from_kfrag_and_cfrag(
         rng: &mut (impl CryptoRng + RngCore),
         capsule: &Capsule,
-        kfrag: &KeyFrag,
+        kfrag: KeyFrag,
         cfrag_e1: &CurvePoint,
         cfrag_v1: &CurvePoint,
     ) -> Self {
         let params = capsule.params;
 
         let rk = kfrag.key;
-        let t = CurveScalar::random_nonzero(rng);
+        let t = SecretBox::new(NonZeroCurveScalar::random(rng));
 
         // Here are the formulaic constituents shared with `CapsuleFrag::verify()`.
 
@@ -93,15 +98,15 @@ impl CapsuleFragProof {
         let u = params.u;
         let u1 = kfrag.proof.commitment;
 
-        let e2 = &e * &t;
-        let v2 = &v * &t;
-        let u2 = &u * &t;
+        let e2 = &e * t.as_secret();
+        let v2 = &v * t.as_secret();
+        let u2 = &u * t.as_secret();
 
         let h = hash_to_cfrag_verification(&[e, *e1, e2, v, *v1, v2, u, u1, u2]);
 
         ////////
 
-        let z3 = &t + &(&rk * &h);
+        let z3 = &(&rk * &h) + t.as_secret();
 
         Self {
             point_e2: e2,
@@ -109,7 +114,7 @@ impl CapsuleFragProof {
             kfrag_commitment: u1,
             kfrag_pok: u2,
             signature: z3,
-            kfrag_signature: kfrag.proof.signature_for_receiver(),
+            kfrag_signature: kfrag.proof.signature_for_receiver,
         }
     }
 }
@@ -156,6 +161,8 @@ impl DeserializableFromArray for CapsuleFrag {
     }
 }
 
+#[cfg(feature = "serde-support")]
+#[cfg_attr(docsrs, doc(cfg(feature = "serde-support")))]
 impl Serialize for CapsuleFrag {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -165,6 +172,8 @@ impl Serialize for CapsuleFrag {
     }
 }
 
+#[cfg(feature = "serde-support")]
+#[cfg_attr(docsrs, doc(cfg(feature = "serde-support")))]
 impl<'de> Deserialize<'de> for CapsuleFrag {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -208,18 +217,20 @@ impl CapsuleFrag {
     fn reencrypted(
         rng: &mut (impl CryptoRng + RngCore),
         capsule: &Capsule,
-        kfrag: &KeyFrag,
+        kfrag: KeyFrag,
     ) -> Self {
         let rk = kfrag.key;
         let e1 = &capsule.point_e * &rk;
         let v1 = &capsule.point_v * &rk;
+        let id = kfrag.id;
+        let precursor = kfrag.precursor;
         let proof = CapsuleFragProof::from_kfrag_and_cfrag(rng, capsule, kfrag, &e1, &v1);
 
         Self {
             point_e1: e1,
             point_v1: v1,
-            kfrag_id: kfrag.id,
-            precursor: kfrag.precursor,
+            kfrag_id: id,
+            precursor,
             proof,
         }
     }
@@ -228,12 +239,12 @@ impl CapsuleFrag {
     /// the encrypting party's key, the decrypting party's key, and the signing key.
     #[allow(clippy::many_single_char_names)]
     pub fn verify(
-        &self,
+        self,
         capsule: &Capsule,
         verifying_pk: &PublicKey,
         delegating_pk: &PublicKey,
         receiving_pk: &PublicKey,
-    ) -> Result<VerifiedCapsuleFrag, CapsuleFragVerificationError> {
+    ) -> Result<VerifiedCapsuleFrag, (CapsuleFragVerificationError, Self)> {
         let params = capsule.params;
 
         // Here are the formulaic constituents shared with
@@ -270,7 +281,10 @@ impl CapsuleFrag {
             )
             .as_ref(),
         ) {
-            return Err(CapsuleFragVerificationError::IncorrectKeyFragSignature);
+            return Err((
+                CapsuleFragVerificationError::IncorrectKeyFragSignature,
+                self,
+            ));
         }
 
         // TODO (#46): if one or more of the values here are incorrect,
@@ -282,21 +296,28 @@ impl CapsuleFrag {
         let correct_rk_commitment = &u * &z == &u2 + &(&u1 * &h);
 
         if !(correct_reencryption_of_e & correct_reencryption_of_v & correct_rk_commitment) {
-            return Err(CapsuleFragVerificationError::IncorrectReencryption);
+            return Err((CapsuleFragVerificationError::IncorrectReencryption, self));
         }
 
-        Ok(VerifiedCapsuleFrag {
-            cfrag: self.clone(),
-        })
+        Ok(VerifiedCapsuleFrag { cfrag: self })
+    }
+
+    /// Explicitly skips verification.
+    /// Useful in cases when the verifying keys are impossible to obtain independently.
+    ///
+    /// **Warning:** make sure you considered the implications of not enforcing verification.
+    pub fn skip_verification(self) -> VerifiedCapsuleFrag {
+        VerifiedCapsuleFrag { cfrag: self }
     }
 }
 
 /// Verified capsule fragment, good for dencryption.
 /// Can be serialized, but cannot be deserialized directly.
-/// It can only be obtained from [`CapsuleFrag::verify`].
+/// It can only be obtained from [`CapsuleFrag::verify`] or [`CapsuleFrag::skip_verification`].
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "bindings-wasm", derive(Serialize, Deserialize))]
 pub struct VerifiedCapsuleFrag {
-    pub(crate) cfrag: CapsuleFrag,
+    cfrag: CapsuleFrag,
 }
 
 impl RepresentableAsArray for VerifiedCapsuleFrag {
@@ -325,7 +346,7 @@ impl VerifiedCapsuleFrag {
     pub(crate) fn reencrypted(
         rng: &mut (impl CryptoRng + RngCore),
         capsule: &Capsule,
-        kfrag: &KeyFrag,
+        kfrag: KeyFrag,
     ) -> Self {
         VerifiedCapsuleFrag {
             cfrag: CapsuleFrag::reencrypted(rng, capsule, kfrag),
@@ -340,6 +361,14 @@ impl VerifiedCapsuleFrag {
     pub fn from_verified_bytes(data: impl AsRef<[u8]>) -> Result<Self, DeserializationError> {
         CapsuleFrag::from_bytes(data).map(|cfrag| Self { cfrag })
     }
+
+    /// Clears the verification status from the capsule frag.
+    /// Useful for the cases where it needs to be put in the protocol structure
+    /// containing [`CapsuleFrag`] types (since those are the ones
+    /// that can be serialized/deserialized freely).
+    pub fn unverify(self) -> CapsuleFrag {
+        self.cfrag
+    }
 }
 
 #[cfg(test)]
@@ -349,12 +378,17 @@ mod tests {
     use alloc::vec::Vec;
 
     use super::{CapsuleFrag, VerifiedCapsuleFrag};
-    use crate::serde::tests::{check_deserialization, check_serialization};
-    use crate::serde::Representation;
+
     use crate::{
         encrypt, generate_kfrags, reencrypt, Capsule, DeserializableFromArray, PublicKey,
         SecretKey, SerializableToArray, Signer,
     };
+
+    #[cfg(feature = "serde-support")]
+    use crate::serde::tests::{check_deserialization, check_serialization};
+
+    #[cfg(feature = "serde-support")]
+    use crate::serde::Representation;
 
     fn prepare_cfrags() -> (
         PublicKey,
@@ -366,9 +400,8 @@ mod tests {
         let delegating_sk = SecretKey::random();
         let delegating_pk = delegating_sk.public_key();
 
-        let signing_sk = SecretKey::random();
-        let signer = Signer::new(&signing_sk);
-        let verifying_pk = signing_sk.public_key();
+        let signer = Signer::new(SecretKey::random());
+        let verifying_pk = signer.verifying_key();
 
         let receiving_sk = SecretKey::random();
         let receiving_pk = receiving_sk.public_key();
@@ -380,7 +413,7 @@ mod tests {
 
         let verified_cfrags: Vec<_> = kfrags
             .iter()
-            .map(|kfrag| reencrypt(&capsule, &kfrag))
+            .map(|kfrag| reencrypt(&capsule, kfrag.clone()))
             .collect();
 
         (
@@ -411,6 +444,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "serde-support")]
     #[test]
     fn test_serde_serialization() {
         let (_delegating_pk, _receiving_pk, _verifying_pk, _capsule, verified_cfrags) =

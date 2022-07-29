@@ -4,20 +4,24 @@ use core::fmt;
 use generic_array::sequence::Concat;
 use generic_array::GenericArray;
 use rand_core::{CryptoRng, RngCore};
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use typenum::op;
 
+#[cfg(feature = "serde-support")]
+use crate::serde::{serde_deserialize, serde_serialize, Representation};
+
 use crate::capsule_frag::CapsuleFrag;
-use crate::curve::{CurvePoint, CurveScalar};
+use crate::curve::{CurvePoint, CurveScalar, NonZeroCurveScalar};
 use crate::hashing_ds::{hash_capsule_points, hash_to_polynomial_arg, hash_to_shared_secret};
 use crate::keys::{PublicKey, SecretKey};
 use crate::params::Parameters;
 use crate::secret_box::SecretBox;
-use crate::serde::{serde_deserialize, serde_serialize, Representation};
 use crate::traits::{
     fmt_public, ConstructionError, DeserializableFromArray, HasTypeName, RepresentableAsArray,
     SerializableToArray,
 };
+
+#[cfg(feature = "serde-support")]
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 /// Errors that can happen when opening a `Capsule` using reencrypted `CapsuleFrag` objects.
 #[derive(Debug, PartialEq)]
@@ -29,9 +33,6 @@ pub enum OpenReencryptedError {
     MismatchedCapsuleFrags,
     /// Some of the given capsule fragments are repeated.
     RepeatingCapsuleFrags,
-    /// An internally hashed value is zero.
-    /// See [rust-umbral#39](https://github.com/nucypher/rust-umbral/issues/39).
-    ZeroHash,
     /// Internal validation of the result has failed.
     /// Can be caused by an incorrect (possibly modified) capsule
     /// or some of the capsule fragments.
@@ -44,8 +45,6 @@ impl fmt::Display for OpenReencryptedError {
             Self::NoCapsuleFrags => write!(f, "Empty CapsuleFrag sequence"),
             Self::MismatchedCapsuleFrags => write!(f, "CapsuleFrags are not pairwise consistent"),
             Self::RepeatingCapsuleFrags => write!(f, "Some of the CapsuleFrags are repeated"),
-            // Will be removed when #39 is fixed
-            Self::ZeroHash => write!(f, "An internally hashed value is zero"),
             Self::ValidationFailed => write!(f, "Internal validation failed"),
         }
     }
@@ -86,6 +85,8 @@ impl DeserializableFromArray for Capsule {
     }
 }
 
+#[cfg(feature = "serde-support")]
+#[cfg_attr(docsrs, doc(cfg(feature = "serde-support")))]
 impl Serialize for Capsule {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -95,6 +96,8 @@ impl Serialize for Capsule {
     }
 }
 
+#[cfg(feature = "serde-support")]
+#[cfg_attr(docsrs, doc(cfg(feature = "serde-support")))]
 impl<'de> Deserialize<'de> for Capsule {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -155,17 +158,18 @@ impl Capsule {
     ) -> (Capsule, SecretBox<KeySeed>) {
         let g = CurvePoint::generator();
 
-        let priv_r = CurveScalar::random_nonzero(rng);
-        let pub_r = &g * &priv_r;
+        let priv_r = SecretBox::new(NonZeroCurveScalar::random(rng));
+        let pub_r = &g * priv_r.as_secret();
 
-        let priv_u = CurveScalar::random_nonzero(rng);
-        let pub_u = &g * &priv_u;
+        let priv_u = SecretBox::new(NonZeroCurveScalar::random(rng));
+        let pub_u = &g * priv_u.as_secret();
 
         let h = hash_capsule_points(&pub_r, &pub_u);
 
-        let s = &priv_u + &(&priv_r * &h);
+        let s = priv_u.as_secret() + &(priv_r.as_secret() * &h);
 
-        let shared_key = SecretBox::new(&delegating_pk.to_point() * &(&priv_r + &priv_u));
+        let shared_key =
+            SecretBox::new(&delegating_pk.to_point() * &(priv_r.as_secret() + priv_u.as_secret()));
 
         let capsule = Self::new(pub_r, pub_u, s);
 
@@ -201,7 +205,7 @@ impl Capsule {
         let dh_point = &precursor * receiving_sk.to_secret_scalar().as_secret();
 
         // Combination of CFrags via Shamir's Secret Sharing reconstruction
-        let mut lc = Vec::<CurveScalar>::with_capacity(cfrags.len());
+        let mut lc = Vec::<NonZeroCurveScalar>::with_capacity(cfrags.len());
         for cfrag in cfrags {
             let coeff = hash_to_polynomial_arg(&precursor, &pub_key, &dh_point, &cfrag.kfrag_id);
             lc.push(coeff);
@@ -226,13 +230,7 @@ impl Capsule {
 
         let orig_pub_key = delegating_pk.to_point();
 
-        // Have to convert from subtle::CtOption here.
-        let inv_d_opt: Option<CurveScalar> = d.invert().into();
-        // At the moment we cannot guarantee statically that the digest `d` is non-zero.
-        // Technically, it is supposed to be non-zero by the choice of `precursor`,
-        // but if is was somehow replaced by an incorrect value,
-        // we'd rather fail gracefully than panic.
-        let inv_d = inv_d_opt.ok_or(OpenReencryptedError::ZeroHash)?;
+        let inv_d = d.invert();
 
         if &orig_pub_key * &(&s * &inv_d) != &(&e_prime * &h) + &v_prime {
             return Err(OpenReencryptedError::ValidationFailed);
@@ -243,7 +241,7 @@ impl Capsule {
     }
 }
 
-fn lambda_coeff(xs: &[CurveScalar], i: usize) -> Option<CurveScalar> {
+fn lambda_coeff(xs: &[NonZeroCurveScalar], i: usize) -> Option<CurveScalar> {
     let mut res = CurveScalar::one();
     for j in 0..xs.len() {
         if j != i {
@@ -263,12 +261,17 @@ mod tests {
     use rand_core::OsRng;
 
     use super::{Capsule, OpenReencryptedError};
-    use crate::serde::tests::{check_deserialization, check_serialization};
-    use crate::serde::Representation;
+
     use crate::{
         encrypt, generate_kfrags, reencrypt, DeserializableFromArray, SecretKey,
         SerializableToArray, Signer,
     };
+
+    #[cfg(feature = "serde-support")]
+    use crate::serde::tests::{check_deserialization, check_serialization};
+
+    #[cfg(feature = "serde-support")]
+    use crate::serde::Representation;
 
     #[test]
     fn test_serialize() {
@@ -288,8 +291,7 @@ mod tests {
         let delegating_sk = SecretKey::random();
         let delegating_pk = delegating_sk.public_key();
 
-        let signing_sk = SecretKey::random();
-        let signer = Signer::new(&signing_sk);
+        let signer = Signer::new(SecretKey::random());
 
         let receiving_sk = SecretKey::random();
         let receiving_pk = receiving_sk.public_key();
@@ -300,10 +302,10 @@ mod tests {
 
         let vcfrags: Vec<_> = kfrags
             .iter()
-            .map(|kfrag| reencrypt(&capsule, &kfrag))
+            .map(|kfrag| reencrypt(&capsule, kfrag.clone()))
             .collect();
 
-        let cfrags: Vec<_> = vcfrags.iter().cloned().map(|vcfrag| vcfrag.cfrag).collect();
+        let cfrags = [vcfrags[0].clone().unverify(), vcfrags[1].clone().unverify()];
 
         let key_seed_reenc = capsule
             .open_reencrypted(&receiving_sk, &delegating_pk, &cfrags)
@@ -313,7 +315,7 @@ mod tests {
         // Empty cfrag vector
         let result = capsule.open_reencrypted(&receiving_sk, &delegating_pk, &[]);
         assert_eq!(
-            result.map(|x| x.as_secret().clone()),
+            result.map(|x| *x.as_secret()),
             Err(OpenReencryptedError::NoCapsuleFrags)
         );
 
@@ -322,19 +324,17 @@ mod tests {
 
         let vcfrags2: Vec<_> = kfrags2
             .iter()
-            .map(|kfrag| reencrypt(&capsule, &kfrag))
+            .map(|kfrag| reencrypt(&capsule, kfrag.clone()))
             .collect();
 
-        let mismatched_cfrags: Vec<_> = vcfrags[0..1]
-            .iter()
-            .cloned()
-            .chain(vcfrags2[1..2].iter().cloned())
-            .map(|vcfrag| vcfrag.cfrag)
-            .collect();
+        let mismatched_cfrags = [
+            vcfrags[0].clone().unverify(),
+            vcfrags2[1].clone().unverify(),
+        ];
 
         let result = capsule.open_reencrypted(&receiving_sk, &delegating_pk, &mismatched_cfrags);
         assert_eq!(
-            result.map(|x| x.as_secret().clone()),
+            result.map(|x| *x.as_secret()),
             Err(OpenReencryptedError::MismatchedCapsuleFrags)
         );
 
@@ -342,11 +342,12 @@ mod tests {
         let (capsule2, _key_seed) = Capsule::from_public_key(&mut OsRng, &delegating_pk);
         let result = capsule2.open_reencrypted(&receiving_sk, &delegating_pk, &cfrags);
         assert_eq!(
-            result.map(|x| x.as_secret().clone()),
+            result.map(|x| *x.as_secret()),
             Err(OpenReencryptedError::ValidationFailed)
         );
     }
 
+    #[cfg(feature = "serde-support")]
     #[test]
     fn test_serde_serialization() {
         let delegating_sk = SecretKey::random();

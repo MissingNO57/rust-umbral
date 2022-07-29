@@ -2,24 +2,12 @@ use criterion::measurement::Measurement;
 use criterion::{criterion_group, criterion_main, BenchmarkGroup, Criterion};
 
 #[cfg(feature = "bench-internals")]
-use umbral_pre::bench::{
-    capsule_from_public_key, capsule_open_original, capsule_open_reencrypted, get_cfrag,
-    unsafe_hash_to_point,
-};
+use umbral_pre::bench::{capsule_from_public_key, capsule_open_original, capsule_open_reencrypted};
 
 use umbral_pre::{
     decrypt_original, decrypt_reencrypted, encrypt, generate_kfrags, reencrypt, SecretKey, Signer,
     VerifiedCapsuleFrag,
 };
-
-#[cfg(feature = "bench-internals")]
-fn bench_unsafe_hash_to_point<'a, M: Measurement>(group: &mut BenchmarkGroup<'a, M>) {
-    let data = b"abcdefg";
-    let label = b"sdasdasd";
-    group.bench_function("unsafe_hash_to_point", |b| {
-        b.iter(|| unsafe_hash_to_point(&data[..], &label[..]))
-    });
-}
 
 #[cfg(feature = "bench-internals")]
 fn bench_capsule_from_public_key<'a, M: Measurement>(group: &mut BenchmarkGroup<'a, M>) {
@@ -46,8 +34,7 @@ fn bench_capsule_open_reencrypted<'a, M: Measurement>(group: &mut BenchmarkGroup
     let delegating_sk = SecretKey::random();
     let delegating_pk = delegating_sk.public_key();
 
-    let signing_sk = SecretKey::random();
-    let signer = Signer::new(&signing_sk);
+    let signer = Signer::new(SecretKey::random());
 
     let receiving_sk = SecretKey::random();
     let receiving_pk = receiving_sk.public_key();
@@ -69,12 +56,13 @@ fn bench_capsule_open_reencrypted<'a, M: Measurement>(group: &mut BenchmarkGroup
 
     let vcfrags: Vec<_> = kfrags
         .iter()
-        .map(|kfrag| reencrypt(&capsule, &kfrag))
+        .map(|kfrag| reencrypt(&capsule, kfrag.clone()))
         .collect();
 
     let cfrags: Vec<_> = vcfrags[0..threshold]
         .iter()
-        .map(|vcfrag| get_cfrag(&vcfrag).clone())
+        .cloned()
+        .map(|vcfrag| vcfrag.unverify())
         .collect();
 
     group.bench_function("Capsule::open_reencrypted", |b| {
@@ -105,8 +93,7 @@ fn bench_pre<'a, M: Measurement>(group: &mut BenchmarkGroup<'a, M>) {
     let threshold: usize = 2;
     let num_frags: usize = threshold + 1;
 
-    let signing_sk = SecretKey::random();
-    let signer = Signer::new(&signing_sk);
+    let signer = Signer::new(SecretKey::random());
 
     let receiving_sk = SecretKey::random();
     let receiving_pk = receiving_sk.public_key();
@@ -137,15 +124,18 @@ fn bench_pre<'a, M: Measurement>(group: &mut BenchmarkGroup<'a, M>) {
         true,
     );
 
-    let vkfrag = verified_kfrags[0].clone();
+    let vkfrag = &verified_kfrags[0];
 
-    group.bench_function("reencrypt", |b| b.iter(|| reencrypt(&capsule, &vkfrag)));
+    group.bench_function("reencrypt", |b| {
+        b.iter(|| reencrypt(&capsule, vkfrag.clone()))
+    });
 
     // Decryption of the reencrypted data
 
     let verified_cfrags: Vec<VerifiedCapsuleFrag> = verified_kfrags[0..threshold]
         .iter()
-        .map(|vkfrag| reencrypt(&capsule, &vkfrag))
+        .cloned()
+        .map(|vkfrag| reencrypt(&capsule, vkfrag))
         .collect();
 
     group.bench_function("decrypt_reencrypted", |b| {
@@ -154,7 +144,7 @@ fn bench_pre<'a, M: Measurement>(group: &mut BenchmarkGroup<'a, M>) {
                 &receiving_sk,
                 &delegating_pk,
                 &capsule,
-                &verified_cfrags,
+                verified_cfrags.clone(),
                 &ciphertext,
             )
         })
@@ -164,7 +154,6 @@ fn bench_pre<'a, M: Measurement>(group: &mut BenchmarkGroup<'a, M>) {
 #[cfg(feature = "bench-internals")]
 fn group_internals(c: &mut Criterion) {
     let mut group = c.benchmark_group("internals");
-    bench_unsafe_hash_to_point(&mut group);
     bench_capsule_from_public_key(&mut group);
     bench_capsule_open_original(&mut group);
     bench_capsule_open_reencrypted(&mut group);

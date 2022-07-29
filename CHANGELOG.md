@@ -6,7 +6,85 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-No changes yet.
+Under construction.
+
+
+## [0.5.2] - 2022-03-15
+
+### Fixed
+
+- `k256` bumped to 0.10.4 to make use of an important bugfix (see https://github.com/RustCrypto/elliptic-curves/issues/529). Previous 0.5.* versions (using `k256` 0.10.2 with the bug) are yanked.
+
+
+## [0.5.1] - 2022-01-22 (**YANKED**)
+
+### Added
+
+- WASM bindings are exposed as a feature `bindings-wasm` in the main crate, to allow dependent crates to create their own WASM bindings and re-export some WASM-wrapped Umbral types. ([#78])
+
+
+[#78]: https://github.com/nucypher/rust-umbral/pull/78
+
+
+## [0.5.0] - 2022-01-19 (**YANKED**)
+
+### Changed
+
+- `k256` dependency bumped to 0.10 (and to match it, `chacha20poly1305` to 0.9, `elliptic-curve` to 0.11, `ecdsa` to 0.13, `signature` to 1.4, MSRV to 1.56, and Rust edition to 2021). ([#87])
+- ABI changed because of the internal change in hashing to scalars (we can hash to non-zero scalars now). Correspondingly, `OpenReencryptedError::ZeroHash` and `SecretKeyFactoryError` have been removed, and `SecretKeyFactory::make_key()` was made infallible. ([#87])
+- Internal cloning in the library methods was eliminated, and, as a result, several methods now consume the given objects. Namely: `Signer::new()` consumes the given `SecretKey`,
+`KeyFrag::verify()` and `CapsuleFrag::verify()` consume the given kfrag/cfrag, `reencrypt()` consumes the cfrag (but not the capsule). ([#91])
+- As a consequence, `KeyFrag::verify()` and `CapsuleFrag::verify()` return the original frag on error (as a tuple with the error itself), for logging purposes (since the original object is not available anymore). ([#91])
+- `VerifiedKeyFrag::to_unverified()` and `VerifiedCapsuleFrag::to_unverified()` were renamed to `unverify()` and consume the corresponding frag. ([#91])
+- Using the [IETF standard](https://datatracker.ietf.org/doc/draft-irtf-cfrg-hash-to-curve/) to hash to point instead of a custom implementation (and bumps `k256` to 0.10.2). Changes the format of all the library's objects! ([#92])
+
+
+### Fixed
+
+- Some previously missed potentially secret values are zeroized in drop. ([#87])
+
+
+[#87]: https://github.com/nucypher/rust-umbral/pull/87
+[#91]: https://github.com/nucypher/rust-umbral/pull/91
+[#92]: https://github.com/nucypher/rust-umbral/pull/92
+
+
+## [0.4.0] - 2021-12-24
+
+### Changed
+
+- `serde` support for types is now gated under the `serde-support` feature (not enabled by default). ([#82])
+
+
+### Added
+
+- Python bindings are exposed as a feature `bindings-python` in the main crate, to allow dependent crates to create their own Python bindings and re-export some Python-wrapped Umbral types. ([#74])
+- `KeyFrag::skip_verification()`, `VerifiedKeyFrag::to_unverified()`, `CapsuleFrag::skip_verification()`, `VerifiedCapsuleFrag::to_unverified()`, and
+the corresponding methods in Python and WASM bindings. ([#84])
+
+
+### Fixed
+
+- Make the source distribution of Python bindings actually usable, by removing a dependency on a workspace directory. ([#86])
+
+
+[#74]: https://github.com/nucypher/rust-umbral/pull/74
+[#82]: https://github.com/nucypher/rust-umbral/pull/82
+[#84]: https://github.com/nucypher/rust-umbral/pull/84
+[#86]: https://github.com/nucypher/rust-umbral/pull/86
+
+
+## [0.3.3] - 2021-12-10
+
+### Added
+
+- Github actions configured for automatic build and push of Python wheels.
+
+
+### Fixed
+
+- Fixed Python example
+- Improved/updated documentation
 
 
 ## [0.3.0] - 2021-09-15
@@ -58,6 +136,10 @@ No changes yet.
 
 - Initial release.
 
-[Unreleased]: https://github.com/nucypher/rust-umbral/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/nucypher/rust-umbral/compare/v0.5.2...HEAD
 [0.2.0]: https://github.com/nucypher/rust-umbral/releases/tag/v0.2.0
 [0.3.0]: https://github.com/nucypher/rust-umbral/releases/tag/v0.3.0
+[0.4.0]: https://github.com/nucypher/rust-umbral/releases/tag/v0.4.0
+[0.5.0]: https://github.com/nucypher/rust-umbral/releases/tag/v0.5.0
+[0.5.1]: https://github.com/nucypher/rust-umbral/releases/tag/v0.5.1
+[0.5.2]: https://github.com/nucypher/rust-umbral/releases/tag/v0.5.2

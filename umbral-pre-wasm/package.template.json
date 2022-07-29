@@ -1,10 +1,10 @@
 {
-  "name": "umbral-pre",
+  "name": "@nucypher/umbral-pre",
   "collaborators": [
     "Bogdan Opanchuk <bogdan@opanchuk.net>"
   ],
   "description": "Implementation of Umbral proxy reencryption algorithm",
-  "version": "0.3.2",
+  "version": "0.5.2",
   "license": "GPL-3.0-only",
   "repository": {
     "type": "git",

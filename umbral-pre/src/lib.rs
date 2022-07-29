@@ -8,6 +8,15 @@
 //! Bob is able to combine these independent re-encryptions and decrypt the original message
 //! using his private key.
 //!
+//! ## Available feature flags
+//!
+//! * `default-rng` - adds methods that use the system RNG (default).
+//! * `serde-support` - implements `serde`-based serialization and deserialization.
+//! * `bindings-python` - adds a `bindings_python` submodule allowing dependent crates
+//!        to use and re-export some of the Python-wrapped Umbral types.
+//! * `bindings-wasm` - adds a `bindings_wasm` submodule allowing dependent crates
+//!        to use and re-export some of the WASM-wrapped Umbral types.
+//!
 //! # Usage
 //!
 //! ```
@@ -20,9 +29,8 @@
 //! // Key Generation (on Alice's side)
 //! let alice_sk = SecretKey::random();
 //! let alice_pk = alice_sk.public_key();
-//! let signing_sk = SecretKey::random();
-//! let signer = Signer::new(&signing_sk);
-//! let verifying_pk = signing_sk.public_key();
+//! let signer = Signer::new(SecretKey::random());
+//! let verifying_pk = signer.verifying_key();
 //!
 //! // Key Generation (on Bob's side)
 //! let bob_sk = SecretKey::random();
@@ -65,11 +73,11 @@
 //!
 //! // Ursula 0
 //! let verified_kfrag0 = kfrag0.verify(&verifying_pk, Some(&alice_pk), Some(&bob_pk)).unwrap();
-//! let verified_cfrag0 = reencrypt(&capsule, &verified_kfrag0);
+//! let verified_cfrag0 = reencrypt(&capsule, verified_kfrag0);
 //!
 //! // Ursula 1
 //! let verified_kfrag1 = kfrag1.verify(&verifying_pk, Some(&alice_pk), Some(&bob_pk)).unwrap();
-//! let verified_cfrag1 = reencrypt(&capsule, &verified_kfrag1);
+//! let verified_cfrag1 = reencrypt(&capsule, verified_kfrag1);
 //!
 //! // ...
 //!
@@ -89,7 +97,7 @@
 //!     .unwrap();
 //!
 //! let plaintext_bob = decrypt_reencrypted(
-//!     &bob_sk, &alice_pk, &capsule, &[verified_cfrag0, verified_cfrag1], &ciphertext).unwrap();
+//!     &bob_sk, &alice_pk, &capsule, [verified_cfrag0, verified_cfrag1], &ciphertext).unwrap();
 //! assert_eq!(&plaintext_bob as &[u8], plaintext);
 //! ```
 //!
@@ -99,11 +107,25 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs, rust_2018_idioms, unused_qualifications)]
 #![no_std]
+// Allows us to mark items in the documentation as gated under specific features.
+#![cfg_attr(docsrs, feature(doc_cfg))]
+
+#[cfg(feature = "std")]
+extern crate std;
 
 extern crate alloc;
+extern crate k256;
+extern crate zeroize;
+extern crate digest;
+extern crate sha2;
 
 #[cfg(feature = "bench-internals")]
 pub mod bench; // Re-export some internals for benchmarks.
+
+#[cfg(feature = "bindings-python")]
+pub mod bindings_python;
+#[cfg(feature = "bindings-wasm")]
+pub mod bindings_wasm;
 
 mod capsule;
 mod capsule_frag;
@@ -116,14 +138,16 @@ mod keys;
 mod params;
 mod pre;
 mod secret_box;
-mod serde;
 mod traits;
+
+#[cfg(any(feature = "serde-support", feature = "bindings-wasm"))]
+mod serde;
 
 pub use capsule::{Capsule, OpenReencryptedError};
 pub use capsule_frag::{CapsuleFrag, CapsuleFragVerificationError, VerifiedCapsuleFrag};
 pub use dem::{DecryptionError, EncryptionError};
 pub use key_frag::{KeyFrag, KeyFragVerificationError, VerifiedKeyFrag};
-pub use keys::{PublicKey, SecretKey, SecretKeyFactory, SecretKeyFactoryError, Signature, Signer};
+pub use keys::{PublicKey, SecretKey, SecretKeyFactory, Signature, Signer};
 pub use pre::{
     decrypt_original, decrypt_reencrypted, encrypt_with_rng, generate_kfrags_with_rng,
     reencrypt_with_rng, ReencryptionError,
