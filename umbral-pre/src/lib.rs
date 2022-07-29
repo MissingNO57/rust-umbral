@@ -118,6 +118,8 @@ extern crate k256;
 extern crate zeroize;
 extern crate digest;
 extern crate sha2;
+extern crate elliptic_curve;
+extern crate subtle;
 
 #[cfg(feature = "bench-internals")]
 pub mod bench; // Re-export some internals for benchmarks.
